@@ -16,24 +16,24 @@ Simple execution :
 
 *Connect:*
 
-![](README/connect.png)
-
+<img src="README/connect.png" height="300">
 
 *Browse Namespaces:*
 
-![](README/namespaces.png)
+<img src="README/namespaces.png" height="300">
 
 *Browse Variables:*
 
-![](README/variables.png)
+<img src="README/variables.png" height="300">
 
 *Show Table Status (Table fields and details):*
 
-![](README/table_status.png)
+<img src="README/table_status.png" height="300">
 
 * 'Select' from AeroSpike :*
 
-![](README/select.png)
+<img src="README/select.png" height="300">
+
 
 
 
