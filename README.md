@@ -1,11 +1,11 @@
 # AS_Mysql - Query AeroSpike from your favorite MySQL Client
 
-This module implements the MySQL server protocol, so you will be able to Query AeroSpike from your favorite MySql-Client.
+This module implements the MySQL server protocol, so you will be able to query AeroSpike from your favorite MySql-Client.
 
-AS_Mysql was wrote as a single python file on purpose since :
+AS_Mysql was intentionally written as a single python file, due to the following reasons:
 
-- AeroSpike instalation already has python installed.
-- DevOps will not be afraid to run it on production evenirmnets
+- AeroSpike already has python installed.
+- Running the program on production environments will be straightforward (for DevOps).
 
 Simple execution :
 
