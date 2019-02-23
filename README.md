@@ -11,9 +11,29 @@ Simple execution :
 
 - just run : `nohup python36 ./as_mysql.py  >/dev/null 2>&1 &`
 
-Screenshots:
+**Screenshots:**
 
 
+*Connect:*
+
+![](README/connect.png)
+
+
+*Browse Namespaces:*
+
+![](README/namespaces.png)
+
+*Browse Variables:*
+
+![](README/variables.png)
+
+*Show Table Status (Table fields and details):*
+
+![](README/table_status.png)
+
+* 'Select' from AeroSpike :*
+
+![](README/select.png)
 
 
 
