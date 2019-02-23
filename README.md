@@ -1,4 +1,4 @@
-# AS_Mysql - Abillity to Query AeroSpike from any MySQL Client
+# AS_Mysql - Query AeroSpike from your favorite MySQL Client
 
 This module implements the MySQL server protocol, so you will be able to Query AeroSpike from your favorite MySql-Client.
 
