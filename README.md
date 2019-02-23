@@ -12,6 +12,8 @@ Simple execution :
 
 - just run : `nohup python36 ./as_mysql.py  >/dev/null 2>&1 &`
 
+Screenshots:
+
 
 
 
