@@ -7,7 +7,7 @@ AS_Mysql was intentionally written as a single python file, due to the following
 - AeroSpike already has python installed.
 - Running the program on production environments will be straightforward (for DevOps).
 
-Simple execution :
+**Simple execution :**
 
 - just run : `nohup python36 ./as_mysql.py  >/dev/null 2>&1 &`
 
