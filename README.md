@@ -11,6 +11,11 @@ AS_Mysql was intentionally written as a single python file, due to the following
 
 - just run : `nohup python36 ./as_mysql.py  >/dev/null 2>&1 &`
 
+**Contributers:**
+
+- Zac Sadan
+- ?
+
 **Screenshots:**
 
 
