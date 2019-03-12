@@ -215,30 +215,32 @@ class Server(object):
 		# Write Definition Header
 		payload = Buffer(1024)
 		length = 4
-		length = self.writeLengthCodedBinary(payload, length, len(definitions))
+		length = self.write_length_coded_binary(payload, length, len(definitions))
+
 		self.writeHeader(payload, length)
 		self.sendPacket(payload.slice(0, length))
 		
 		# Write each definition
-		length = 4
-		val = None
 		for definition in definitions:
+			length = 4
+			payload = Buffer(1024)
+
 			for field in ['catalog', 'schema', 'table', 'orgTable', 'name', 'orgName']:
-				val = definition.get(field, '')				
-				length = self.writeLengthCodedString(payload, length, val)				
-		
+				val = definition.get(field, '')
+				length = self.write_length_coded_string(payload, length, val)
+
 			length = payload.writeUInt8(0x0C, length)
-			length = payload.writeUInt16LE(11, length) # ASCII
+			length = payload.writeUInt16LE(11, length)  # ASCII
 			length = payload.writeUInt32LE(definition.get('columnLength'), length)
 			length = payload.writeUInt8(definition.get('columnType'), length)
 			length = payload.writeUInt16LE(definition.get('flags', 0), length)
 			length = payload.writeUInt8(definition.get('decimals', 0), length)
-			length = payload.writeUInt16LE(0, length) # \0\0 FILLER
-			length = self.writeLengthCodedString(payload, length, definition.get('default'))
-			self.writeHeader(payload, length)
+			length = payload.writeUInt16LE(0, length)  # \0\0 FILLER
+			length = self.write_length_coded_string(payload, length, definition.get('default'))
 
+			self.writeHeader(payload, length)
 			self.sendPacket(payload.slice(0, length))
-  
+
 		self.sendEOF()
 
 	def sendRow(self, row):
@@ -248,12 +250,12 @@ class Server(object):
 			if cell is None:
 				length = payload.writeUInt8(0xFB, length)
 			else:
-				length = self.writeLengthCodedString(payload, length, cell)
+				length = self.write_length_coded_string(payload, length, cell)
 		
 		self.writeHeader(payload, length)
 		self.sendPacket(payload.slice(0, length))
 
-	def sendRows(self, rows = []):
+	def sendRows(self, rows=[]):
 		for row in rows:
 			self.sendRow(row)
 		self.sendEOF()
@@ -280,7 +282,7 @@ class Server(object):
 
 		pos = payload.writeUInt32LE(os.getpid(), pos)
 
-		pos += Buffer.copyToBuffer(self.salt, payload, pos, 0, 8)
+		pos += Buffer.copy_to_buffer(self.salt, payload, pos, 0, 8)
 
 		pos = payload.writeUInt8(0, pos)
 
@@ -299,7 +301,7 @@ class Server(object):
 		payload.fill(0, pos, pos + 13)
 		pos += 13
 
-		pos += Buffer.copyToBuffer(self.salt, payload, pos, 8)
+		pos += Buffer.copy_to_buffer(self.salt, payload, pos, 8)
 		pos = payload.writeUInt8(0, pos)
 		self.writeHeader(payload, pos)
 		return self.sendPacket(payload.slice(0, pos))
@@ -328,10 +330,9 @@ class Server(object):
 				incoming = Buffer(length)
 				length = 0
 				for buf in self.incoming:
-					length += Buffer.copyToBuffer(buf, incoming, length)
+					length += Buffer.copy_to_buffer(buf, incoming, length)
 			remaining = self.readPackets(incoming)
 			self.incoming = [remaining.data]
-
 
 	def readPackets(self, buf):
 		offset = 0
@@ -341,7 +342,7 @@ class Server(object):
 			data = buf.slice(offset)
 			if data.length() < 4:
 				return data
-  
+
 			packetLength = data.readUIntLE(0, 3)
 
 			if data.length() < packetLength + 4:
@@ -359,7 +360,7 @@ class Server(object):
 		# http://dev.mysql.com/doc/internals/en/the-packet-header.html
 
 		if packet.length() == 0:
-			return self.sendError({ 'message': 'Zero length hello packet' })
+			return self.send_error({'message': 'Zero length hello packet'})
 
 		ptr = 0
 
@@ -371,11 +372,11 @@ class Server(object):
 
 		self.clientCharset = packet.readUInt8(ptr)
 		ptr += 1
- 
+
 		some_filler = packet.slice(ptr, ptr + 23)
 		ptr += 23
 
-		usernameEnd = packet.indexOf(0, ptr)
+		usernameEnd = packet.index_of(0, ptr)
 		username = packet.toString('ascii', ptr, usernameEnd)
 		ptr = usernameEnd + 1
 
@@ -385,27 +386,31 @@ class Server(object):
 		if scrambleLength > 0:
 			self.scramble = packet.slice(ptr, ptr + scrambleLength).data
 			ptr += scrambleLength
- 
+
 		database = None
-		databaseEnd = packet.indexOf(0, ptr)
+		databaseEnd = packet.index_of(0, ptr)
 		if databaseEnd >= 0:
 			database = packet.toString('ascii', ptr, databaseEnd)
 
 		self.onPacket = None
-	
-		try: 
-			authorized = self.onAuthorize({ 'client_flags': clientFlags.data, 
-										  'max_packet_size': maxPacketSize.data, 
-										  'username': username, 
-										  'database': database })
+
+		try:
+			authorized = self.onAuthorize(
+				{
+					'username': username,
+					'database': database,
+					'client_flags': clientFlags.data,
+					'max_packet_size': maxPacketSize.data,
+				}
+			)
+
 			if not authorized: 
 				raise ServerError('Not Authorized')
 
 			self.onPacket = self.normalPacketHandler
-			self.sendOK({ 'message': 'OK' })
-
+			self.sendOK({'message': 'OK'})
 		except:
-			self.sendError({ 'message': 'Authorization Failure' })
+			self.send_error({'message': 'Authorization Failure'})
 			self.socket.shutdown(self.shutdown_flag)
 			self.socket.close()
 
@@ -433,18 +438,17 @@ class Server(object):
 		data = Buffer(len(args.get('message')) + 64)
 		length = 4
 		length = data.writeUInt8(0, length)
-		length = self.writeLengthCodedBinary(data, length, args.get('affectedRows'))
-		length = self.writeLengthCodedBinary(data, length, args.get('insertId'))
+		length = self.write_length_coded_binary(data, length, args.get('affectedRows'))
+		length = self.write_length_coded_binary(data, length, args.get('insertId'))
 		length = data.writeUInt16LE(SERVER_STATUS_AUTOCOMMIT, length)
 		length = data.writeUInt16LE(args.get('warningCount', 0), length)
-		length = self.writeLengthCodedString(data, length, args.get('message'))
+		length = self.write_length_coded_string(data, length, args.get('message'))
 		self.writeHeader(data, length)
 
 		self.sendPacket(data.slice(0, length))
 
-	def sendError(self, args=None):
-		## Sending Error ...
-		def_args = { 'message': 'Unknown MySQL error', 'errno': 2000, 'sqlState': 'HY000'}		
+	def send_error(self, args=None):
+		def_args = { 'message': 'Unknown MySQL error', 'errno': 2000, 'sqlState': 'HY000'}
 		args = self.get_args_with_defaults(args, def_args)
 		data = Buffer(len(args.get('message')) + 64)
 		length = 4
@@ -458,22 +462,23 @@ class Server(object):
 		self.writeHeader(data, length)
 		self.sendPacket(data.slice(0, length))
 
-	def writeLengthCodedString(self, buf, pos, strval):
+	def write_length_coded_string(self, buf, pos, strval):
 		if strval is None:
 			return buf.writeUInt8(0, pos) 
 		if type(strval) != str:
-			#Mangle it
+			# Mangle it
 			strval = str(strval)
+
 		buf.writeUInt8(253, pos)
 		buf.writeUIntLE(len(strval), pos + 1, 3)
 		buf.write(strval, pos + 4)
 		return pos + len(strval) + 4
 
-	def writeLengthCodedBinary(self, buf, pos, int_value):
-		if int_value is None: 
-		   return buf.writeUInt8(251, pos)
+	def write_length_coded_binary(self, buf, pos, int_value):
+		if int_value is None:
+			return buf.writeUInt8(251, pos)
 		elif int_value < 251:
-		   return buf.writeUInt8(int_value, pos)		
+			return buf.writeUInt8(int_value, pos)
 		elif int_value < 0x10000:
 			buf.writeUInt8(252, pos)
 			buf.writeUInt16LE(int_value, pos + 1)
@@ -487,14 +492,15 @@ class Server(object):
 			buf.writeUIntLE(int_value, pos + 1, 8)
 			return pos + 9
 
+
 class ServerError(Exception):
 	"""Common class for exceptions in this module."""
 
 	def __init__(self, message):
 		self.message = message
 
-class Buffer(object):
 
+class Buffer(object):
 	def __init__(self, init_value):
 		if type(init_value) == int:
 			self.data = bytearray(init_value)
@@ -506,14 +512,16 @@ class Buffer(object):
 		self.encoding = 'utf-8'
 
 	# https://nodejs.org/api/buffer.html#buffer_buf_copy_target_targetstart_sourcestart_sourceend	
-	def copy(self, target_buf, target_start_pos = 0, 
-			 source_start_pos = 0, source_end_pos = None):
-		return self.copyToBuffer(self.data, target_buf, target_start_pos, 
-								 source_start_pos, source_end_pos)
+	def copy(self, target_buf, target_start_pos=0, source_start_pos=0, source_end_pos=None):
+		return self.copy_to_buffer(
+			self.data,
+			target_buf,
+			target_start_pos,
+			source_start_pos, source_end_pos
+		)
 
 	@staticmethod
-	def copyToBuffer(source_data, target_buf, target_start_pos = 0, 
-			 source_start_pos = 0, source_end_pos = None):
+	def copy_to_buffer(source_data, target_buf, target_start_pos=0, source_start_pos=0, source_end_pos=None):
 		if source_end_pos is None:
 			source_end_pos = len(source_data)	
 		target_available_bytes = target_buf.length() - target_start_pos - 1
@@ -531,14 +539,14 @@ class Buffer(object):
 		return copied_bytes_num
 
 	# https://nodejs.org/api/buffer.html#buffer_buf_fill_value_offset_end_encoding	
-	def fill(self, value, start_pos = 0, end_pos = None):
+	def fill(self, value, start_pos=0, end_pos=None):
 		if end_pos is None:
 			end_pos = self.size
 		bytes_number = end_pos - start_pos
 		self.data[start_pos:end_pos] = bytes([value for i in range(end_pos - start_pos)])
 
 	# https://nodejs.org/api/buffer.html#buffer_buf_indexof_value_byteoffset_encoding	
-	def indexOf(self, value, pos):
+	def index_of(self, value, pos):
 		return self.data.find(value, pos)
 
 	# https://nodejs.org/api/buffer.html#buffer_buf_length	
@@ -552,7 +560,7 @@ class Buffer(object):
 		value_bytes = self.data[pos:pos+byte_len]
 		return int.from_bytes(value_bytes, byteorder='little')
 
-	def slice(self, start_pos = 0, end_pos = None):
+	def slice(self, start_pos=0, end_pos=None):
 		if end_pos is None:
 			end_pos = self.size
 		return Buffer(self.data[start_pos:end_pos])
@@ -657,8 +665,6 @@ def run_aql(host, cmd):
 
 def transform_aql_to_arr(output):
 
-	print('Out: {}'.format(output))
-
 	if output and len(output) >= 5:
 
 		rows = []
@@ -673,9 +679,6 @@ def transform_aql_to_arr(output):
 					row.strip().replace('"', '') for row in row_str.decode("utf-8").split('|') if row.strip()
 				]
 			)
-
-		print('Cols: {}'.format(cols))
-		print('Rows: {}'.format(rows))
 
 		return cols, rows
 	else:
@@ -729,25 +732,29 @@ def handleQuery_RunAeroSpike(server, query):
 	
 		ret_cols, ret_rows = run_as_cmd("SHOW DATABASES", "show namespaces")
 
-		cols = [server.newDefinition({'name': 'Database'})]
 		rows = ret_rows
+		cols.append(server.newDefinition(
+			{'name': 'Database'}
+		))
 
 	elif "SHOW TABLE STATUS" in query:
 	
 		ret_cols, ret_rows = run_as_cmd("SHOW TABLE STATUS", "show sets")
 
 		rows = ret_rows		
-		for fieldName in ret_cols:
-			if fieldName == "set":
-				fieldName = "Name"
-			cols.append(server.newDefinition({'name': fieldName, 'orgName':fieldName}))
+		for field_name in ret_cols:
+			cols.append(server.newDefinition(
+				{'name': "Name" if field_name == "set" else field_name}
+			))
 		
 	elif "SELECT" in query or "select" in query:		
 		ret_cols, ret_rows = run_as_cmd("SELECT", query.replace('\r\n', ' '))
 
 		rows = ret_rows		
-		for fieldName in ret_cols:			
-			cols.append( server.newDefinition({ 'name' : fieldName }) )
+		for field_name in ret_cols:
+			cols.append(server.newDefinition(
+				{'name': field_name}
+			))
 		
 	return cols, rows
 
@@ -800,14 +807,15 @@ def handleQuery(server, query):
 		cols = [server.newDefinition({ 'name' : 'CONNECTION_ID()' })]
 		rows = [[ random.randint(1091364, 9091364) ]]
 	# -----
-	elif ( 	"SELECT" in query or 
-			"select" in query or 
-			"SHOW DATABASES" in query or 
-			"SHOW TABLE STATUS" in query ):
-		cols,rows = handleQuery_RunAeroSpike(server,query)
+	elif "SELECT" in query or \
+			"select" in query or \
+			"SHOW TABLES" in query or \
+			"SHOW DATABASES" in query or \
+			"SHOW TABLE STATUS" in query:
+		cols, rows = handleQuery_RunAeroSpike(server, query)
 	# -----
 	else:
-		cols = [{ 'name' : query }]
+		cols = [{'name': query}]
 		rows = []
 
 # 	Then send it back to the user in table format
@@ -815,6 +823,7 @@ def handleQuery(server, query):
 #   server.sendRows([[query]])
 	server.sendDefinitions(cols)
 	server.sendRows(rows)
+
 
 def command_handler(server, cmd):
 	# command is a numeric ID, extra is a Buffer
@@ -829,7 +838,7 @@ def command_handler(server, cmd):
 		server.handleDisconnect()
 	else:	
 		print('Unknown Command: ' + str(command))
-		server.sendError({ 'message': 'Unknown Command'})
+		server.send_error({'message': 'Unknown Command'})
 
 
 def client_thread(connection):
@@ -849,8 +858,7 @@ def client_thread(connection):
 			break		
 
 		server.handleData(data)	
-		
-		
+
 
 def create_client_thread(connection):
 	t = None
