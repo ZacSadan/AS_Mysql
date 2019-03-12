@@ -11,19 +11,20 @@ Windows Debugging:
 
 '''
 
-from threading import Thread
-import traceback
+import re
 import os
-from binascii import hexlify
 import socket
 import random
 import platform
+import traceback
+import subprocess
+from threading import Thread
 
 print('Start server...')
 
-HOST, PORT = '', 3306 # default MySQL Server Port
+AS_HOST, HOST, PORT = '127.0.0.1', '', 3306  # default MySQL Server Port
 
-__author__ = 'Zac Sadan'
+__author__ = 'Zac Sadan, Dmitri Krasnenko'
 __license__ = "GPL"
 __version__ = "1.0.0"
 
@@ -614,8 +615,10 @@ socket_server.bind((HOST, PORT))
 # become a server socket
 socket_server.listen(5)
 
+
 def hex_subset(data):
 	return ' '.join('%02x' % b for b in data)
+
 
 def authorization_handler(auth_params):
 	print('Authorizing...')
@@ -625,17 +628,58 @@ def authorization_handler(auth_params):
 	print('database', auth_params.get('database'))
 	return True
 
-def run_as_cmd(query,cmd):
-	cmd_output_str = ""
 
+def run_as_cmd(query, cmd):
 	if "Windows" in platform.system():
-		file = open('.\debug\\' + query, 'r')
-		cmd_output_str = file.read().strip()
-		file.close()
-	else:
-		print("aql -c '" + cmd + ";'")
+		with open('.\\debug\\' + query, 'r') as file:
+			cmd_output_str = file.read()
 
-	return cmd_output_str
+		return transform_string_to_arr(
+			cmd_output_str.strip()
+		)
+	else:
+		return transform_aql_to_arr(
+			run_aql(AS_HOST, cmd)
+		)
+
+
+def run_aql(host, cmd):
+	print("Running: aql -h {} -c '{}'".format(host, cmd))
+
+	proc = subprocess.Popen(['aql', '-h', host, '-c', cmd], stdout=subprocess.PIPE)
+	if proc.returncode:
+		return []
+
+	stdout = proc.communicate()[0]
+	exit_code = proc.wait()
+	return stdout.splitlines() if exit_code == 0 and stdout else []
+
+
+def transform_aql_to_arr(output):
+
+	print('Out: {}'.format(output))
+
+	if output and len(output) >= 5:
+
+		rows = []
+		cols = [col.strip().replace('"', '') for col in output[2].decode("utf-8").split('|') if col.strip()]
+
+		for row_str in output[4:-6]:
+			if row_str[0] == '+':
+				break
+
+			rows.append(
+				[
+					row.strip().replace('"', '') for row in row_str.decode("utf-8").split('|') if row.strip()
+				]
+			)
+
+		print('Cols: {}'.format(cols))
+		print('Rows: {}'.format(rows))
+
+		return cols, rows
+	else:
+		return [], []
 
 
 def transform_string_to_arr(output):
@@ -645,111 +689,106 @@ def transform_string_to_arr(output):
 	rows = []
 	
 	for line in output.splitlines():		
-		if(state=="rows_lines" and line!= "" and line[0]=="+"):
+		if state=="rows_lines" and line!= "" and line[0]=="+":
 			state="none"
 			continue
-		elif(state=="desc_line" and line!= "" and line[0]=="+"):
+		elif state=="desc_line" and line!= "" and line[0]=="+":
 			state="rows_lines"
 			continue
-		elif(line!= "" and line[0]=="+"):
+		elif line!= "" and line[0]=="+":
 			state="desc_line"
 			continue
-		elif(state=="desc_line"):
+		elif state=="desc_line":
 			arr_list = []
 			arr = line.split("|")
 			for value in arr:
 				value = value.strip()
 				value = value.replace('"','');
-				if(value!=""):
-				    arr_list.append(value)
+				if value!="":
+					arr_list.append(value)
 			cols = arr_list
 			continue
-		elif(state=="rows_lines"):
+		elif state=="rows_lines":
 			arr_list = []
 			arr = line.split("|")
 			for value in arr:				
-				if ( value!=""):
+				if value!="":
 					value = value.strip()
 					value = value.replace('"','');					
 					arr_list.append(value)
 			rows.append(arr_list)
 			continue
 		
-	#print ( cols )
-	#print ( rows )
-	#return [[ 'namesapce1' ],['namespace2']] 
-	return cols,rows
-	
+	return cols, rows
+
 	
 def handleQuery_RunAeroSpike(server, query):
 	cols = []
 	rows = []
 	if "SHOW DATABASES" in query:
 	
-		output = run_as_cmd("SHOW DATABASES","show namespaces")		
-		ret_cols,ret_rows = transform_string_to_arr(output)
-		
-		cols = [server.newDefinition({ 'name' : 'Database' })]
+		ret_cols, ret_rows = run_as_cmd("SHOW DATABASES", "show namespaces")
+
+		cols = [server.newDefinition({'name': 'Database'})]
 		rows = ret_rows
-		#rows = [[ 'namesapce1' ],['namespace2']] 
-	
+
 	elif "SHOW TABLE STATUS" in query:
 	
-		output = run_as_cmd("SHOW TABLE STATUS","show sets")		
-		ret_cols,ret_rows = transform_string_to_arr(output)
-		
+		ret_cols, ret_rows = run_as_cmd("SHOW TABLE STATUS", "show sets")
+
 		rows = ret_rows		
 		for fieldName in ret_cols:
-			if (fieldName == "set" ):
+			if fieldName == "set":
 				fieldName = "Name"
-			cols.append( server.newDefinition({ 'name' : fieldName }) )
+			cols.append(server.newDefinition({'name': fieldName, 'orgName':fieldName}))
 		
 	elif "SELECT" in query or "select" in query:		
-		output = run_as_cmd("SELECT",query.replace('\r\n', ' '))		
-		ret_cols,ret_rows = transform_string_to_arr(output)
-				
+		ret_cols, ret_rows = run_as_cmd("SELECT", query.replace('\r\n', ' '))
+
 		rows = ret_rows		
 		for fieldName in ret_cols:			
 			cols.append( server.newDefinition({ 'name' : fieldName }) )
 		
-	return cols,rows
+	return cols, rows
 
 	
 def handleQuery(server, query):
-	# Take the query, print it out
-	print('Got Query: ' + query);
+	print('Got Query: ' + query)
 
-	#dummy outputs...
-	if ( "USE" in query or 
-		 "SHOW FUNCTION" in query or 
-		 "SHOW PROCEDURE" in query or 
-		 "SHOW TRIGGERS" in query or 
-		 "SHOW EVENTS" in query or
-		 "SHOW WARNINGS " in query or
-		 "SHOW ENGINES" in query
-		):
-		cols = [{ 'name' : '' }]
+	# dummy outputs...
+	if "USE" in query or \
+			"SHOW EVENTS" in query or \
+			"SHOW ENGINES" in query or \
+			"SHOW FUNCTION" in query or \
+			"SHOW TRIGGERS" in query or \
+			"SHOW WARNINGS" in query or \
+			"SHOW PROCEDURE" in query in query:
+		cols = [{'name': ''}]
 		rows = []
 
 	elif "SHOW STATUS" in query  :
-		 cols = [ server.newDefinition({ 'name' : 'Variable_name' }) , server.newDefinition({ 'name' : "Value"}) ]		 
-		 rows = [[ 'Compression' , 'OFF'],[  "Uptime"  ,  "989898"  ]] 
+		cols = [ server.newDefinition({ 'name' : 'Variable_name' }) , server.newDefinition({ 'name' : "Value"}) ]
+		rows = [[ 'Compression' , 'OFF'],[  "Uptime"  ,  "989898"  ]]
 
 	elif "SHOW VARIABLES" in query  :
-		 cols = [ server.newDefinition({ 'name' : 'Variable_name' }) , server.newDefinition({ 'name' : "Value"}) ]
-		 rows = [[ 'hostname' , 'localhost'],[  'time_format'  ,  '%H:%i:%s'  ],[  'time_zone'  ,  'SYSTEM'  ],[  'version_comment'  ,  '(mysql2as_driver)'  ]] 
+		cols = [ server.newDefinition({ 'name' : 'Variable_name' }) , server.newDefinition({ 'name' : "Value"}) ]
+		rows = [[ 'hostname' , 'localhost'],[  'time_format'  ,  '%H:%i:%s'  ],[  'time_zone'  ,  'SYSTEM'  ],[  'version_comment'  ,  '(mysql2as_driver)'  ]]
 
-	elif "SHOW COLLATION" in query  :
-		 cols = [ server.newDefinition({ 'name' : 'Collation' }) , 
-				  server.newDefinition({ 'name' : 'Charset'  }) ,
-				  server.newDefinition({ 'name' : 'Id' }) ,
-				  server.newDefinition({ 'name' : 'Default' }) ,
-				  server.newDefinition({ 'name' : 'Compiled' }) ,
-				  server.newDefinition({ 'name' : 'Sortlen' }) 
-				 ]
-		 rows = [[ 'utf8_general_ci'   , 'utf8'  , '33', 'Yes', 'Yes', '1'],
-				 [ 'hebrew_general_ci' , 'hebrew', '16', 'Yes', 'Yes', '1'],
-				 [ 'hebrew_bin'		, 'hebrew', '71', 'Yes', 'Yes', '1']]
+	elif "SHOW COLLATION" in query:
+		cols = [
+			server.newDefinition({ 'name' : 'Collation' }) ,
+			server.newDefinition({ 'name' : 'Charset'  }) ,
+			server.newDefinition({ 'name' : 'Id' }) ,
+			server.newDefinition({ 'name' : 'Default' }) ,
+			server.newDefinition({ 'name' : 'Compiled' }) ,
+			server.newDefinition({ 'name' : 'Sortlen' })
+		]
+
+		rows = [
+			['utf8_general_ci',   'utf8',   '33', 'Yes', 'Yes', '1'],
+			['hebrew_general_ci', 'hebrew', '16', 'Yes', 'Yes', '1'],
+			['hebrew_bin',        'hebrew', '71', 'Yes', 'Yes', '1'],
+		]
 
 	# -----
 	elif "DEFAULT_COLLATION_NAME" in query and "SCHEMA_NAME" in query  :
