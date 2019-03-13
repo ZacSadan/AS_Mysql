@@ -11,19 +11,20 @@ Windows Debugging:
 
 '''
 
-from threading import Thread
-import traceback
+import re
 import os
-from binascii import hexlify
 import socket
 import random
 import platform
+import traceback
+import subprocess
+from threading import Thread
 
 print('Start server...')
 
-HOST, PORT = '', 3306 # default MySQL Server Port
+AS_HOST, HOST, PORT = '127.0.0.1', '', 3306  # default MySQL Server Port
 
-__author__ = 'Zac Sadan'
+__author__ = 'Zac Sadan, Dmitri Krasnenko'
 __license__ = "GPL"
 __version__ = "1.0.0"
 
@@ -214,30 +215,32 @@ class Server(object):
 		# Write Definition Header
 		payload = Buffer(1024)
 		length = 4
-		length = self.writeLengthCodedBinary(payload, length, len(definitions))
+		length = self.write_length_coded_binary(payload, length, len(definitions))
+
 		self.writeHeader(payload, length)
 		self.sendPacket(payload.slice(0, length))
 		
 		# Write each definition
-		length = 4
-		val = None
 		for definition in definitions:
+			length = 4
+			payload = Buffer(1024)
+
 			for field in ['catalog', 'schema', 'table', 'orgTable', 'name', 'orgName']:
-				val = definition.get(field, '')				
-				length = self.writeLengthCodedString(payload, length, val)				
-		
+				val = definition.get(field, '')
+				length = self.write_length_coded_string(payload, length, val)
+
 			length = payload.writeUInt8(0x0C, length)
-			length = payload.writeUInt16LE(11, length) # ASCII
+			length = payload.writeUInt16LE(11, length)  # ASCII
 			length = payload.writeUInt32LE(definition.get('columnLength'), length)
 			length = payload.writeUInt8(definition.get('columnType'), length)
 			length = payload.writeUInt16LE(definition.get('flags', 0), length)
 			length = payload.writeUInt8(definition.get('decimals', 0), length)
-			length = payload.writeUInt16LE(0, length) # \0\0 FILLER
-			length = self.writeLengthCodedString(payload, length, definition.get('default'))
-			self.writeHeader(payload, length)
+			length = payload.writeUInt16LE(0, length)  # \0\0 FILLER
+			length = self.write_length_coded_string(payload, length, definition.get('default'))
 
+			self.writeHeader(payload, length)
 			self.sendPacket(payload.slice(0, length))
-  
+
 		self.sendEOF()
 
 	def sendRow(self, row):
@@ -247,12 +250,12 @@ class Server(object):
 			if cell is None:
 				length = payload.writeUInt8(0xFB, length)
 			else:
-				length = self.writeLengthCodedString(payload, length, cell)
+				length = self.write_length_coded_string(payload, length, cell)
 		
 		self.writeHeader(payload, length)
 		self.sendPacket(payload.slice(0, length))
 
-	def sendRows(self, rows = []):
+	def sendRows(self, rows=[]):
 		for row in rows:
 			self.sendRow(row)
 		self.sendEOF()
@@ -279,7 +282,7 @@ class Server(object):
 
 		pos = payload.writeUInt32LE(os.getpid(), pos)
 
-		pos += Buffer.copyToBuffer(self.salt, payload, pos, 0, 8)
+		pos += Buffer.copy_to_buffer(self.salt, payload, pos, 0, 8)
 
 		pos = payload.writeUInt8(0, pos)
 
@@ -298,7 +301,7 @@ class Server(object):
 		payload.fill(0, pos, pos + 13)
 		pos += 13
 
-		pos += Buffer.copyToBuffer(self.salt, payload, pos, 8)
+		pos += Buffer.copy_to_buffer(self.salt, payload, pos, 8)
 		pos = payload.writeUInt8(0, pos)
 		self.writeHeader(payload, pos)
 		return self.sendPacket(payload.slice(0, pos))
@@ -327,10 +330,9 @@ class Server(object):
 				incoming = Buffer(length)
 				length = 0
 				for buf in self.incoming:
-					length += Buffer.copyToBuffer(buf, incoming, length)
+					length += Buffer.copy_to_buffer(buf, incoming, length)
 			remaining = self.readPackets(incoming)
 			self.incoming = [remaining.data]
-
 
 	def readPackets(self, buf):
 		offset = 0
@@ -340,7 +342,7 @@ class Server(object):
 			data = buf.slice(offset)
 			if data.length() < 4:
 				return data
-  
+
 			packetLength = data.readUIntLE(0, 3)
 
 			if data.length() < packetLength + 4:
@@ -358,7 +360,7 @@ class Server(object):
 		# http://dev.mysql.com/doc/internals/en/the-packet-header.html
 
 		if packet.length() == 0:
-			return self.sendError({ 'message': 'Zero length hello packet' })
+			return self.send_error({'message': 'Zero length hello packet'})
 
 		ptr = 0
 
@@ -370,11 +372,11 @@ class Server(object):
 
 		self.clientCharset = packet.readUInt8(ptr)
 		ptr += 1
- 
+
 		some_filler = packet.slice(ptr, ptr + 23)
 		ptr += 23
 
-		usernameEnd = packet.indexOf(0, ptr)
+		usernameEnd = packet.index_of(0, ptr)
 		username = packet.toString('ascii', ptr, usernameEnd)
 		ptr = usernameEnd + 1
 
@@ -384,27 +386,31 @@ class Server(object):
 		if scrambleLength > 0:
 			self.scramble = packet.slice(ptr, ptr + scrambleLength).data
 			ptr += scrambleLength
- 
+
 		database = None
-		databaseEnd = packet.indexOf(0, ptr)
+		databaseEnd = packet.index_of(0, ptr)
 		if databaseEnd >= 0:
 			database = packet.toString('ascii', ptr, databaseEnd)
 
 		self.onPacket = None
-	
-		try: 
-			authorized = self.onAuthorize({ 'client_flags': clientFlags.data, 
-										  'max_packet_size': maxPacketSize.data, 
-										  'username': username, 
-										  'database': database })
+
+		try:
+			authorized = self.onAuthorize(
+				{
+					'username': username,
+					'database': database,
+					'client_flags': clientFlags.data,
+					'max_packet_size': maxPacketSize.data,
+				}
+			)
+
 			if not authorized: 
 				raise ServerError('Not Authorized')
 
 			self.onPacket = self.normalPacketHandler
-			self.sendOK({ 'message': 'OK' })
-
+			self.sendOK({'message': 'OK'})
 		except:
-			self.sendError({ 'message': 'Authorization Failure' })
+			self.send_error({'message': 'Authorization Failure'})
 			self.socket.shutdown(self.shutdown_flag)
 			self.socket.close()
 
@@ -432,18 +438,17 @@ class Server(object):
 		data = Buffer(len(args.get('message')) + 64)
 		length = 4
 		length = data.writeUInt8(0, length)
-		length = self.writeLengthCodedBinary(data, length, args.get('affectedRows'))
-		length = self.writeLengthCodedBinary(data, length, args.get('insertId'))
+		length = self.write_length_coded_binary(data, length, args.get('affectedRows'))
+		length = self.write_length_coded_binary(data, length, args.get('insertId'))
 		length = data.writeUInt16LE(SERVER_STATUS_AUTOCOMMIT, length)
 		length = data.writeUInt16LE(args.get('warningCount', 0), length)
-		length = self.writeLengthCodedString(data, length, args.get('message'))
+		length = self.write_length_coded_string(data, length, args.get('message'))
 		self.writeHeader(data, length)
 
 		self.sendPacket(data.slice(0, length))
 
-	def sendError(self, args=None):
-		## Sending Error ...
-		def_args = { 'message': 'Unknown MySQL error', 'errno': 2000, 'sqlState': 'HY000'}		
+	def send_error(self, args=None):
+		def_args = { 'message': 'Unknown MySQL error', 'errno': 2000, 'sqlState': 'HY000'}
 		args = self.get_args_with_defaults(args, def_args)
 		data = Buffer(len(args.get('message')) + 64)
 		length = 4
@@ -457,22 +462,23 @@ class Server(object):
 		self.writeHeader(data, length)
 		self.sendPacket(data.slice(0, length))
 
-	def writeLengthCodedString(self, buf, pos, strval):
+	def write_length_coded_string(self, buf, pos, strval):
 		if strval is None:
 			return buf.writeUInt8(0, pos) 
 		if type(strval) != str:
-			#Mangle it
+			# Mangle it
 			strval = str(strval)
+
 		buf.writeUInt8(253, pos)
 		buf.writeUIntLE(len(strval), pos + 1, 3)
 		buf.write(strval, pos + 4)
 		return pos + len(strval) + 4
 
-	def writeLengthCodedBinary(self, buf, pos, int_value):
-		if int_value is None: 
-		   return buf.writeUInt8(251, pos)
+	def write_length_coded_binary(self, buf, pos, int_value):
+		if int_value is None:
+			return buf.writeUInt8(251, pos)
 		elif int_value < 251:
-		   return buf.writeUInt8(int_value, pos)		
+			return buf.writeUInt8(int_value, pos)
 		elif int_value < 0x10000:
 			buf.writeUInt8(252, pos)
 			buf.writeUInt16LE(int_value, pos + 1)
@@ -486,14 +492,15 @@ class Server(object):
 			buf.writeUIntLE(int_value, pos + 1, 8)
 			return pos + 9
 
+
 class ServerError(Exception):
 	"""Common class for exceptions in this module."""
 
 	def __init__(self, message):
 		self.message = message
 
-class Buffer(object):
 
+class Buffer(object):
 	def __init__(self, init_value):
 		if type(init_value) == int:
 			self.data = bytearray(init_value)
@@ -505,14 +512,16 @@ class Buffer(object):
 		self.encoding = 'utf-8'
 
 	# https://nodejs.org/api/buffer.html#buffer_buf_copy_target_targetstart_sourcestart_sourceend	
-	def copy(self, target_buf, target_start_pos = 0, 
-			 source_start_pos = 0, source_end_pos = None):
-		return self.copyToBuffer(self.data, target_buf, target_start_pos, 
-								 source_start_pos, source_end_pos)
+	def copy(self, target_buf, target_start_pos=0, source_start_pos=0, source_end_pos=None):
+		return self.copy_to_buffer(
+			self.data,
+			target_buf,
+			target_start_pos,
+			source_start_pos, source_end_pos
+		)
 
 	@staticmethod
-	def copyToBuffer(source_data, target_buf, target_start_pos = 0, 
-			 source_start_pos = 0, source_end_pos = None):
+	def copy_to_buffer(source_data, target_buf, target_start_pos=0, source_start_pos=0, source_end_pos=None):
 		if source_end_pos is None:
 			source_end_pos = len(source_data)	
 		target_available_bytes = target_buf.length() - target_start_pos - 1
@@ -530,14 +539,14 @@ class Buffer(object):
 		return copied_bytes_num
 
 	# https://nodejs.org/api/buffer.html#buffer_buf_fill_value_offset_end_encoding	
-	def fill(self, value, start_pos = 0, end_pos = None):
+	def fill(self, value, start_pos=0, end_pos=None):
 		if end_pos is None:
 			end_pos = self.size
 		bytes_number = end_pos - start_pos
 		self.data[start_pos:end_pos] = bytes([value for i in range(end_pos - start_pos)])
 
 	# https://nodejs.org/api/buffer.html#buffer_buf_indexof_value_byteoffset_encoding	
-	def indexOf(self, value, pos):
+	def index_of(self, value, pos):
 		return self.data.find(value, pos)
 
 	# https://nodejs.org/api/buffer.html#buffer_buf_length	
@@ -551,7 +560,7 @@ class Buffer(object):
 		value_bytes = self.data[pos:pos+byte_len]
 		return int.from_bytes(value_bytes, byteorder='little')
 
-	def slice(self, start_pos = 0, end_pos = None):
+	def slice(self, start_pos=0, end_pos=None):
 		if end_pos is None:
 			end_pos = self.size
 		return Buffer(self.data[start_pos:end_pos])
@@ -614,8 +623,10 @@ socket_server.bind((HOST, PORT))
 # become a server socket
 socket_server.listen(5)
 
+
 def hex_subset(data):
 	return ' '.join('%02x' % b for b in data)
+
 
 def authorization_handler(auth_params):
 	print('Authorizing...')
@@ -625,17 +636,53 @@ def authorization_handler(auth_params):
 	print('database', auth_params.get('database'))
 	return True
 
-def run_as_cmd(query,cmd):
-	cmd_output_str = ""
 
+def run_as_cmd(query, cmd):
 	if "Windows" in platform.system():
-		file = open('.\debug\\' + query, 'r')
-		cmd_output_str = file.read().strip()
-		file.close()
-	else:
-		print("aql -c '" + cmd + ";'")
+		with open('.\\debug\\' + query, 'r') as file:
+			cmd_output_str = file.read()
 
-	return cmd_output_str
+		return transform_string_to_arr(
+			cmd_output_str.strip()
+		)
+	else:
+		return transform_aql_to_arr(
+			run_aql(AS_HOST, cmd)
+		)
+
+
+def run_aql(host, cmd):
+	print("Running: aql -h {} -c '{}'".format(host, cmd))
+
+	proc = subprocess.Popen(['aql', '-h', host, '-c', cmd], stdout=subprocess.PIPE)
+	if proc.returncode:
+		return []
+
+	stdout = proc.communicate()[0]
+	exit_code = proc.wait()
+	return stdout.splitlines() if exit_code == 0 and stdout else []
+
+
+def transform_aql_to_arr(output):
+
+	if output and len(output) >= 5:
+
+		rows = []
+		cols = [col.strip().replace('"', '') for col in output[2].decode("utf-8").split('|') if col.strip()]
+
+		for row_str in output[4:-6]:
+			if row_str[0] == '+':
+				break
+
+			rows.append(
+				[
+					row.strip().replace('"', '') for row in row_str.decode("utf-8").split('|') if row.strip()
+				]
+			)
+
+		return cols, rows
+	else:
+		return [], []
 
 
 def transform_string_to_arr(output):
@@ -645,111 +692,110 @@ def transform_string_to_arr(output):
 	rows = []
 	
 	for line in output.splitlines():		
-		if(state=="rows_lines" and line!= "" and line[0]=="+"):
+		if state=="rows_lines" and line!= "" and line[0]=="+":
 			state="none"
 			continue
-		elif(state=="desc_line" and line!= "" and line[0]=="+"):
+		elif state=="desc_line" and line!= "" and line[0]=="+":
 			state="rows_lines"
 			continue
-		elif(line!= "" and line[0]=="+"):
+		elif line!= "" and line[0]=="+":
 			state="desc_line"
 			continue
-		elif(state=="desc_line"):
+		elif state=="desc_line":
 			arr_list = []
 			arr = line.split("|")
 			for value in arr:
 				value = value.strip()
 				value = value.replace('"','');
-				if(value!=""):
-				    arr_list.append(value)
+				if value!="":
+					arr_list.append(value)
 			cols = arr_list
 			continue
-		elif(state=="rows_lines"):
+		elif state=="rows_lines":
 			arr_list = []
 			arr = line.split("|")
 			for value in arr:				
-				if ( value!=""):
+				if value!="":
 					value = value.strip()
 					value = value.replace('"','');					
 					arr_list.append(value)
 			rows.append(arr_list)
 			continue
 		
-	#print ( cols )
-	#print ( rows )
-	#return [[ 'namesapce1' ],['namespace2']] 
-	return cols,rows
-	
+	return cols, rows
+
 	
 def handleQuery_RunAeroSpike(server, query):
 	cols = []
 	rows = []
 	if "SHOW DATABASES" in query:
 	
-		output = run_as_cmd("SHOW DATABASES","show namespaces")		
-		ret_cols,ret_rows = transform_string_to_arr(output)
-		
-		cols = [server.newDefinition({ 'name' : 'Database' })]
+		ret_cols, ret_rows = run_as_cmd("SHOW DATABASES", "show namespaces")
+
 		rows = ret_rows
-		#rows = [[ 'namesapce1' ],['namespace2']] 
-	
+		cols.append(server.newDefinition(
+			{'name': 'Database'}
+		))
+
 	elif "SHOW TABLE STATUS" in query:
 	
-		output = run_as_cmd("SHOW TABLE STATUS","show sets")		
-		ret_cols,ret_rows = transform_string_to_arr(output)
-		
+		ret_cols, ret_rows = run_as_cmd("SHOW TABLE STATUS", "show sets")
+
 		rows = ret_rows		
-		for fieldName in ret_cols:
-			if (fieldName == "set" ):
-				fieldName = "Name"
-			cols.append( server.newDefinition({ 'name' : fieldName }) )
+		for field_name in ret_cols:
+			cols.append(server.newDefinition(
+				{'name': "Name" if field_name == "set" else field_name}
+			))
 		
 	elif "SELECT" in query or "select" in query:		
-		output = run_as_cmd("SELECT",query.replace('\r\n', ' '))		
-		ret_cols,ret_rows = transform_string_to_arr(output)
-				
+		ret_cols, ret_rows = run_as_cmd("SELECT", query.replace('\r\n', ' '))
+
 		rows = ret_rows		
-		for fieldName in ret_cols:			
-			cols.append( server.newDefinition({ 'name' : fieldName }) )
+		for field_name in ret_cols:
+			cols.append(server.newDefinition(
+				{'name': field_name}
+			))
 		
-	return cols,rows
+	return cols, rows
 
 	
 def handleQuery(server, query):
-	# Take the query, print it out
-	print('Got Query: ' + query);
+	print('Got Query: ' + query)
 
-	#dummy outputs...
-	if ( "USE" in query or 
-		 "SHOW FUNCTION" in query or 
-		 "SHOW PROCEDURE" in query or 
-		 "SHOW TRIGGERS" in query or 
-		 "SHOW EVENTS" in query or
-		 "SHOW WARNINGS " in query or
-		 "SHOW ENGINES" in query
-		):
-		cols = [{ 'name' : '' }]
+	# dummy outputs...
+	if "USE" in query or \
+			"SHOW EVENTS" in query or \
+			"SHOW ENGINES" in query or \
+			"SHOW FUNCTION" in query or \
+			"SHOW TRIGGERS" in query or \
+			"SHOW WARNINGS" in query or \
+			"SHOW PROCEDURE" in query in query:
+		cols = [{'name': ''}]
 		rows = []
 
 	elif "SHOW STATUS" in query  :
-		 cols = [ server.newDefinition({ 'name' : 'Variable_name' }) , server.newDefinition({ 'name' : "Value"}) ]		 
-		 rows = [[ 'Compression' , 'OFF'],[  "Uptime"  ,  "989898"  ]] 
+		cols = [ server.newDefinition({ 'name' : 'Variable_name' }) , server.newDefinition({ 'name' : "Value"}) ]
+		rows = [[ 'Compression' , 'OFF'],[  "Uptime"  ,  "989898"  ]]
 
 	elif "SHOW VARIABLES" in query  :
-		 cols = [ server.newDefinition({ 'name' : 'Variable_name' }) , server.newDefinition({ 'name' : "Value"}) ]
-		 rows = [[ 'hostname' , 'localhost'],[  'time_format'  ,  '%H:%i:%s'  ],[  'time_zone'  ,  'SYSTEM'  ],[  'version_comment'  ,  '(mysql2as_driver)'  ]] 
+		cols = [ server.newDefinition({ 'name' : 'Variable_name' }) , server.newDefinition({ 'name' : "Value"}) ]
+		rows = [[ 'hostname' , 'localhost'],[  'time_format'  ,  '%H:%i:%s'  ],[  'time_zone'  ,  'SYSTEM'  ],[  'version_comment'  ,  '(mysql2as_driver)'  ]]
 
-	elif "SHOW COLLATION" in query  :
-		 cols = [ server.newDefinition({ 'name' : 'Collation' }) , 
-				  server.newDefinition({ 'name' : 'Charset'  }) ,
-				  server.newDefinition({ 'name' : 'Id' }) ,
-				  server.newDefinition({ 'name' : 'Default' }) ,
-				  server.newDefinition({ 'name' : 'Compiled' }) ,
-				  server.newDefinition({ 'name' : 'Sortlen' }) 
-				 ]
-		 rows = [[ 'utf8_general_ci'   , 'utf8'  , '33', 'Yes', 'Yes', '1'],
-				 [ 'hebrew_general_ci' , 'hebrew', '16', 'Yes', 'Yes', '1'],
-				 [ 'hebrew_bin'		, 'hebrew', '71', 'Yes', 'Yes', '1']]
+	elif "SHOW COLLATION" in query:
+		cols = [
+			server.newDefinition({ 'name' : 'Collation' }) ,
+			server.newDefinition({ 'name' : 'Charset'  }) ,
+			server.newDefinition({ 'name' : 'Id' }) ,
+			server.newDefinition({ 'name' : 'Default' }) ,
+			server.newDefinition({ 'name' : 'Compiled' }) ,
+			server.newDefinition({ 'name' : 'Sortlen' })
+		]
+
+		rows = [
+			['utf8_general_ci',   'utf8',   '33', 'Yes', 'Yes', '1'],
+			['hebrew_general_ci', 'hebrew', '16', 'Yes', 'Yes', '1'],
+			['hebrew_bin',        'hebrew', '71', 'Yes', 'Yes', '1'],
+		]
 
 	# -----
 	elif "DEFAULT_COLLATION_NAME" in query and "SCHEMA_NAME" in query  :
@@ -761,14 +807,15 @@ def handleQuery(server, query):
 		cols = [server.newDefinition({ 'name' : 'CONNECTION_ID()' })]
 		rows = [[ random.randint(1091364, 9091364) ]]
 	# -----
-	elif ( 	"SELECT" in query or 
-			"select" in query or 
-			"SHOW DATABASES" in query or 
-			"SHOW TABLE STATUS" in query ):
-		cols,rows = handleQuery_RunAeroSpike(server,query)
+	elif "SELECT" in query or \
+			"select" in query or \
+			"SHOW TABLES" in query or \
+			"SHOW DATABASES" in query or \
+			"SHOW TABLE STATUS" in query:
+		cols, rows = handleQuery_RunAeroSpike(server, query)
 	# -----
 	else:
-		cols = [{ 'name' : query }]
+		cols = [{'name': query}]
 		rows = []
 
 # 	Then send it back to the user in table format
@@ -776,6 +823,7 @@ def handleQuery(server, query):
 #   server.sendRows([[query]])
 	server.sendDefinitions(cols)
 	server.sendRows(rows)
+
 
 def command_handler(server, cmd):
 	# command is a numeric ID, extra is a Buffer
@@ -790,7 +838,7 @@ def command_handler(server, cmd):
 		server.handleDisconnect()
 	else:	
 		print('Unknown Command: ' + str(command))
-		server.sendError({ 'message': 'Unknown Command'})
+		server.send_error({'message': 'Unknown Command'})
 
 
 def client_thread(connection):
@@ -810,8 +858,7 @@ def client_thread(connection):
 			break		
 
 		server.handleData(data)	
-		
-		
+
 
 def create_client_thread(connection):
 	t = None
