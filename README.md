@@ -9,13 +9,7 @@ AS_Mysql was intentionally written as a single python file, due to the following
 
 **Simple execution :**
 
-- just run : `nohup python36 ./as_mysql.py  >/dev/null 2>&1 &`
-
-**Contributers:**
-
-- Zac Sadan
-- Dmitri Krasnenko
-- ?
+- just run : `nohup python36 ./as_mysql.py  >/dev/null 2>&1 &` on one of your AeroSpike nodes.
 
 **Screenshots:**
 
@@ -41,10 +35,14 @@ AS_Mysql was intentionally written as a single python file, due to the following
 <img src="README/select.png" height="300">
 
 
+**Contributers:**
+
+- Zac Sadan
+- Dmitri Krasnenko
+- ?
 
 
-
-Misc:
+**Misc:**
 
 - Some of the code is ported version of : https://github.com/CloudQuote/faux-mysql-server/blob/master/src/index.js
 - Windows Debugging: `/cygdrive/c/Program\ Files\ \(x86\)/Python36-32/python.exe -u as_mysql.py`
