@@ -14,6 +14,7 @@ AS_Mysql was intentionally written as a single python file, due to the following
 **Contributers:**
 
 - Zac Sadan
+- Dmitri Krasnenko
 - ?
 
 **Screenshots:**
