@@ -9,7 +9,7 @@ AS_Mysql was intentionally written as a single python file, due to the following
 
 **Simple execution :**
 
-- just run : `nohup python36 ./as_mysql.py  >/dev/null 2>&1 &` on one of your AeroSpike nodes.
+- just run : `nohup python36 ./as_mysql.py  >/dev/null 2>&1 &` , on one of your AeroSpike nodes.
 
 **Screenshots:**
 
