@@ -213,36 +213,51 @@ class Server(object):
 			'default': params.get('default')
 		}
 
-	def send_definitions(self, definitions):
-		# Write Definition Header
+	def send_definition(self, definition):
 		pos = 4
 		payload = Buffer(1024)
-		pos = self.write_length_coded_binary(payload, pos, len(definitions))
+
+		for field in ['catalog', 'schema', 'table', 'orgTable', 'name', 'orgName']:
+			pos = self.write_length_coded_string(
+				payload, pos, definition.get(field, '')
+			)
+
+		pos = payload.writeUInt8(0x0C, pos)
+		pos = payload.writeUInt16LE(11, pos)  # ASCII
+		pos = payload.writeUInt32LE(definition.get('columnLength'), pos)
+		pos = payload.writeUInt8(definition.get('columnType'), pos)
+		pos = payload.writeUInt16LE(definition.get('flags', 0), pos)
+		pos = payload.writeUInt8(definition.get('decimals', 0), pos)
+		pos = payload.writeUInt16LE(0, pos)  # \0\0 FILLER
+		pos = self.write_length_coded_string(payload, pos, definition.get('default'))
 
 		self.write_header(payload, pos)
 		self.send_packet(payload.slice(0, pos))
-		
+
+	def send_definitions(self, definitions):
+		pos = 4
+		payload = Buffer(1024)
+
+		# Write definition header
+		pos = self.write_length_coded_binary(
+			payload, pos, len(definitions)
+		)
+
+		self.write_header(
+			payload, pos
+		)
+
+		self.send_packet(
+			payload.slice(0, pos)
+		)
+
 		# Write each definition
 		for definition in definitions:
-			pos = 4
-			payload = Buffer(1024)
+			self.send_definition(
+				definition
+			)
 
-			for field in ['catalog', 'schema', 'table', 'orgTable', 'name', 'orgName']:
-				val = definition.get(field, '')
-				pos = self.write_length_coded_string(payload, pos, val)
-
-			pos = payload.writeUInt8(0x0C, pos)
-			pos = payload.writeUInt16LE(11, pos)  # ASCII
-			pos = payload.writeUInt32LE(definition.get('columnLength'), pos)
-			pos = payload.writeUInt8(definition.get('columnType'), pos)
-			pos = payload.writeUInt16LE(definition.get('flags', 0), pos)
-			pos = payload.writeUInt8(definition.get('decimals', 0), pos)
-			pos = payload.writeUInt16LE(0, pos)  # \0\0 FILLER
-			pos = self.write_length_coded_string(payload, pos, definition.get('default'))
-
-			self.write_header(payload, pos)
-			self.send_packet(payload.slice(0, pos))
-
+		# Send EOF
 		self.send_eof()
 
 	def send_row(self, row):
