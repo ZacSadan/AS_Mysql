@@ -84,7 +84,7 @@ SERVER_STATUS_NO_BACKSLASH_ESCAPES = 512
 
 COM_SLEEP = 0
 COM_QUIT = 1
-COM_INIT_DB= 2
+COM_INIT_DB = 2
 COM_QUERY = 3
 COM_FIELD_LIST = 4
 COM_CREATE_DB = 5
@@ -193,6 +193,13 @@ class Server(object):
 
 	def send_packet(self, payload):
 		return self.socket.send(payload.data)
+
+	def send_results(self, col, rows):
+		if not col:
+			self.send_ok()
+		else:
+			self.send_definitions(col)
+			self.send_rows(rows)
 
 	def new_definition(self, params):
 		return {
@@ -430,7 +437,7 @@ class Server(object):
 				raise ServerError('Not Authorized')
 
 			self.onPacket = self.normal_packet_handler
-			self.send_ok({'message': 'OK'})
+			self.send_ok()
 		except:
 			self.send_error({'message': 'Authorization Failure'})
 			self.socket.shutdown(self.shutdown_flag)
@@ -454,41 +461,48 @@ class Server(object):
 		return args
 	
 	def send_ok(self, args=None):
-		def_args = {'message': None, 'affectedRows': 0, 'insertId': None, 'warningCount': 0}
-		args = self.get_args_with_defaults(args, def_args)
+		def_args = {'insertId': None, 'affectedRows': 0, 'warningCount': 0}
+		args = self.get_args_with_defaults(
+			args,
+			def_args
+		)
 
-		data = Buffer(len(args.get('message')) + 64)
-		length = 4
-		length = data.writeUInt8(0, length)
-		length = self.write_length_coded_binary(data, length, args.get('affectedRows'))
-		length = self.write_length_coded_binary(data, length, args.get('insertId'))
-		length = data.writeUInt16LE(SERVER_STATUS_AUTOCOMMIT, length)
-		length = data.writeUInt16LE(args.get('warningCount', 0), length)
-		length = self.write_length_coded_string(data, length, args.get('message'))
-		self.write_header(data, length)
+		pos = 4
+		data = Buffer(64)
+		pos = data.writeUInt8(0, pos)
+		pos = self.write_length_coded_binary(data, pos, args.get('affectedRows'))
+		pos = self.write_length_coded_binary(data, pos, args.get('insertId'))
+		pos = data.writeUInt16LE(SERVER_STATUS_AUTOCOMMIT, pos)
+		pos = data.writeUInt16LE(args.get('warningCount', 0), pos)
 
-		self.send_packet(data.slice(0, length))
+		self.write_header(data, pos)
+		self.send_packet(data.slice(0, pos))
 
 	def send_error(self, args=None):
-		def_args = {'message': 'Unknown MySQL error', 'errno': 2000, 'sqlState': 'HY000'}
-		args = self.get_args_with_defaults(args, def_args)
+		def_args = {'message': 'Unknown error', 'errno': 2000, 'sqlState': 'HY000'}
+		args = self.get_args_with_defaults(
+			args, def_args,
+		)
+
+		pos = 4
 		data = Buffer(len(args.get('message')) + 64)
-		length = 4
-		length = data.writeUInt8(0xFF, length)
-		length = data.writeUInt16LE(args.get('errno'), length)
-		length += data.write('#', length)
-		length += data.write(args.get('sqlState'), length, 5)
-		length += data.write(args.get('message'), length)
-		length = data.writeUInt8(0, length)
 
-		self.write_header(data, length)
-		self.send_packet(data.slice(0, length))
+		pos = data.writeUInt8(0xFF, pos)
+		pos = data.writeUInt16LE(args.get('errno'), pos)
+		pos += data.write('#', pos)
+		pos += data.write(args.get('sqlState'), pos, 5)
+		pos += data.write(args.get('message'), pos)
+		pos = data.writeUInt8(0, pos)
 
-	def write_length_coded_string(self, buf, pos, strval):
+		self.write_header(data, pos)
+		self.send_packet(data.slice(0, pos))
+
+	@staticmethod
+	def write_length_coded_string(buf, pos, strval):
 		if strval is None:
 			return buf.writeUInt8(0, pos) 
+
 		if type(strval) != str:
-			# Mangle it
 			strval = str(strval)
 
 		buf.writeUInt8(253, pos)
@@ -496,7 +510,8 @@ class Server(object):
 		buf.write(strval, pos + 4)
 		return pos + len(strval) + 4
 
-	def write_length_coded_binary(self, buf, pos, int_value):
+	@staticmethod
+	def write_length_coded_binary(buf, pos, int_value):
 		if int_value is None:
 			return buf.writeUInt8(251, pos)
 		elif int_value < 251:
@@ -670,15 +685,19 @@ def run_as_cmd(query, cmd):
 
 
 def run_aql(host, cmd):
-	print("Running: aql -h {} -c '{}'".format(host, cmd))
+	print("Execs: aql -h {} -c '{}'".format(host, cmd))
 
-	proc = subprocess.Popen(['aql', '-h', host, '-c', cmd], stdout=subprocess.PIPE)
-	if proc.returncode:
-		return []
+	proc = subprocess.Popen(['aql', '-h', host, '-c', cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	stds = proc.communicate()
+	resc = proc.wait()
 
-	stdout = proc.communicate()[0]
-	exit_code = proc.wait()
-	return stdout.splitlines() if exit_code == 0 and stdout else []
+	stderr = stds[1]
+	stdout = stds[0]
+
+	if not resc and not stderr:
+		return stdout.splitlines()
+	else:
+		raise Exception(stderr.decode("utf-8"))
 
 
 def transform_aql_to_arr(output):
@@ -786,69 +805,74 @@ def handle_query_run_aerospike(server, query):
 
 	
 def handle_query(server, query):
-	print('Got Query: ' + query)
+	print('Query: ' + query)
 
-	# dummy outputs...
-	if "USE" in query or \
-			"SHOW EVENTS" in query or \
-			"SHOW ENGINES" in query or \
-			"SHOW FUNCTION" in query or \
-			"SHOW TRIGGERS" in query or \
-			"SHOW WARNINGS" in query or \
-			"SHOW PROCEDURE" in query in query:
-		cols = [{'name': ''}]
-		rows = []
+	try:
 
-	elif "SHOW STATUS" in query  :
-		cols = [server.new_definition({'name' : 'Variable_name'}) , server.new_definition({'name' : "Value"})]
-		rows = [[ 'Compression' , 'OFF'],[  "Uptime"  ,  "989898"  ]]
+		# dummy outputs...
+		if "USE" in query or \
+				"SHOW EVENTS" in query or \
+				"SHOW ENGINES" in query or \
+				"SHOW FUNCTION" in query or \
+				"SHOW TRIGGERS" in query or \
+				"SHOW WARNINGS" in query or \
+				"SHOW PROCEDURE" in query or "SELECT DATABASE" in query:
+			cols = []
+			rows = []
 
-	elif "SHOW VARIABLES" in query  :
-		cols = [server.new_definition({'name' : 'Variable_name'}) , server.new_definition({'name' : "Value"})]
-		rows = [[ 'hostname' , 'localhost'],[  'time_format'  ,  '%H:%i:%s'  ],[  'time_zone'  ,  'SYSTEM'  ],[  'version_comment'  ,  '(mysql2as_driver)'  ]]
+		elif "SELECT @@version_comment" in query or "select @@version_comment" in query:
+			cols = [{'name': '@@version_comment'}]
+			rows = [['(mysql2as_driver)']]
 
-	elif "SHOW COLLATION" in query:
-		cols = [
-			server.new_definition({'name' : 'Collation'}) ,
-			server.new_definition({'name' : 'Charset'}) ,
-			server.new_definition({'name' : 'Id'}) ,
-			server.new_definition({'name' : 'Default'}) ,
-			server.new_definition({'name' : 'Compiled'}) ,
-			server.new_definition({'name' : 'Sortlen'})
-		]
+		elif "SHOW STATUS" in query:
+			cols = [server.new_definition({'name': 'Variable_name'}), server.new_definition({'name': "Value"})]
+			rows = [['Compression', 'OFF'], ["Uptime", "989898"]]
 
-		rows = [
-			['utf8_general_ci',   'utf8',   '33', 'Yes', 'Yes', '1'],
-			['hebrew_general_ci', 'hebrew', '16', 'Yes', 'Yes', '1'],
-			['hebrew_bin',        'hebrew', '71', 'Yes', 'Yes', '1'],
-		]
+		elif "SHOW VARIABLES" in query:
+			cols = [server.new_definition({'name': 'Variable_name'}), server.new_definition({'name': "Value"})]
+			rows = [['hostname', 'localhost'], ['time_format', '%H:%i:%s'], ['time_zone', 'SYSTEM'], ['version_comment', '(mysql2as_driver)']]
 
-	# -----
-	elif "DEFAULT_COLLATION_NAME" in query and "SCHEMA_NAME" in query  :
-		cols = [server.new_definition({'name' : 'DEFAULT_COLLATION_NAME'})]
-		rows = [[ "utf8_general_ci" ]]
+		elif "SHOW COLLATION" in query:
+			cols = [
+				server.new_definition({'name': 'Id'}),
+				server.new_definition({'name': 'Charset'}),
+				server.new_definition({'name': 'Default'}),
+				server.new_definition({'name': 'Sortlen'}),
+				server.new_definition({'name': 'Compiled'}),
+				server.new_definition({'name': 'Collation'}),
+			]
 
-	# -----
-	elif "SELECT CONNECTION_ID()" in query  :
-		cols = [server.new_definition({'name' : 'CONNECTION_ID()'})]
-		rows = [[ random.randint(1091364, 9091364) ]]
-	# -----
-	elif "SELECT" in query or \
-			"select" in query or \
-			"SHOW TABLES" in query or \
-			"SHOW DATABASES" in query or \
-			"SHOW TABLE STATUS" in query:
-		cols, rows = handle_query_run_aerospike(server, query)
-	# -----
-	else:
-		cols = [{'name': query}]
-		rows = []
+			rows = [
+				['utf8_general_ci',   'utf8',   '33', 'Yes', 'Yes', '1'],
+				['hebrew_general_ci', 'hebrew', '16', 'Yes', 'Yes', '1'],
+				['hebrew_bin',        'hebrew', '71', 'Yes', 'Yes', '1'],
+			]
 
-# 	Then send it back to the user in table format
-#   server.sendDefinitions([server.newDefinition({ 'name': 'TheCommandYouSent2'})])
-#   server.sendRows([[query]])
-	server.send_definitions(cols)
-	server.send_rows(rows)
+		# -----
+		elif "DEFAULT_COLLATION_NAME" in query and "SCHEMA_NAME" in query  :
+			cols = [server.new_definition({'name' : 'DEFAULT_COLLATION_NAME'})]
+			rows = [[ "utf8_general_ci" ]]
+
+		# -----
+		elif "SELECT CONNECTION_ID()" in query  :
+			cols = [server.new_definition({'name' : 'CONNECTION_ID()'})]
+			rows = [[ random.randint(1091364, 9091364) ]]
+		# -----
+		elif "SELECT" in query or \
+				"select" in query or \
+				"SHOW TABLES" in query or \
+				"SHOW DATABASES" in query or \
+				"SHOW TABLE STATUS" in query:
+			cols, rows = handle_query_run_aerospike(server, query)
+		# -----
+		else:
+			cols = [{'name': query}]
+			rows = []
+
+		# Then send it back to the user in table format
+		server.send_results(cols, rows)
+	except Exception as e:
+		server.send_error({'message': str(e)})
 
 
 def command_handler(server, cmd):
@@ -858,8 +882,8 @@ def command_handler(server, cmd):
 	if command == COM_QUERY:
 		handle_query(server, extra.decode('utf-8', 'ignore'))
 	elif command == COM_PING:
-		server.send_ok({'message': 'OK'});
-	elif command == None or command == COM_QUIT:
+		server.send_ok()
+	elif command is None or command == COM_QUIT:
 		print('Disconnecting')
 		server.handle_disconnect()
 	else:	
