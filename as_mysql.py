@@ -688,17 +688,25 @@ def run_aql(host, cmd):
 def transform_aql_to_arr(output):
 
 	if output and len(output) >= 5:
-
 		rows = []
 		cols = [col.strip().replace('"', '') for col in output[2].decode("utf-8").split('|') if col.strip()]
 
 		for row_str in output[4:-6]:
-			if row_str[0] == '+':
-				break
+			dec_row_str = row_str.decode(
+				"utf-8"
+			)
+
+			i = 0
+			j = len(dec_row_str)
+			if dec_row_str[0] == '|':
+				i = 1
+
+			if dec_row_str[-1] == '|':
+				j = -1
 
 			rows.append(
 				[
-					row.strip().replace('"', '') for row in row_str.decode("utf-8").split('|') if row.strip()
+					row.strip().replace('"', '') for row in dec_row_str[i:j].split('|')
 				]
 			)
 
