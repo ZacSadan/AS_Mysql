@@ -19,7 +19,7 @@ from threading import Thread
 
 print('Start server...')
 
-AS_HOST, HOST, PORT = '127.0.0.1', '', 3306  # default MySQL Server Port
+AS_HOST, HOST, PORT = os.environ['AS_HOST'] or '127.0.0.1', '', 3306  # default MySQL Server Port
 
 __author__ = 'Zac Sadan, Dmitri Krasnenko'
 __license__ = "GPL"
@@ -439,7 +439,7 @@ class Server(object):
 				raise ServerError('Not Authorized')
 
 			self.onPacket = self.normal_packet_handler
-			self.send_ok({'message': 'OK'})
+			self.send_ok()
 		except:
 			self.send_error({'message': 'Authorization Failure'})
 			self.socket.shutdown(self.shutdown_flag)
@@ -463,7 +463,7 @@ class Server(object):
 		return args
 	
 	def send_ok(self, args=None):
-		def_args = {'message': None, 'insertId': None, 'affectedRows': 0, 'warningCount': 0}
+		def_args = {'message': '', 'insertId': None, 'affectedRows': 0, 'warningCount': 0}
 		args = self.get_args_with_defaults(
 			args,
 			def_args
@@ -896,7 +896,7 @@ def handle_query(server, query):
 			cols = [server.new_definition({'name': 'CONNECTION_ID()'})]
 			rows = [[random.randint(1091364, 9091364)]]
 		# -----
-		elif re.search("select|show tables|show databases|show table status", query, re.IGNORECASE):
+		elif re.search("select|show tables|show databases|show table status|show sets", query, re.IGNORECASE):
 			cols, rows = handle_query_run_aerospike(server, query)
 		# -----
 		else:
@@ -916,7 +916,7 @@ def command_handler(server, cmd):
 	if command == COM_QUERY:
 		handle_query(server, extra.decode('utf-8', 'ignore'))
 	elif command == COM_PING:
-		server.send_ok({'message': 'OK'})
+		server.send_ok()
 	elif command is None or command == COM_QUIT:
 		print('Disconnecting')
 		server.handle_disconnect()
