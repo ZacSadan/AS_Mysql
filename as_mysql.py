@@ -12,6 +12,7 @@ import os
 import socket
 import random
 import platform
+import string
 import traceback
 import subprocess
 from threading import Thread
@@ -201,7 +202,8 @@ class Server(object):
 			self.send_definitions(col)
 			self.send_rows(rows)
 
-	def new_definition(self, params):
+	@staticmethod
+	def new_definition(params):
 		return {
 			'catalog': params.get('catalog', 'def'),
 			'schema': params.get('db'),
@@ -771,31 +773,66 @@ def transform_string_to_arr(output):
 
 	
 def handle_query_run_aerospike(server, query):
-	cols = []
-	rows = []
-	if "SHOW DATABASES" in query:
+	# cols = None
+	# rows = None
+	if re.match("show databases", query, re.IGNORECASE):
+
+		_, rows = run_as_cmd(
+			"show databases", "show namespaces"
+		)
+
+		cols = [server.new_definition({'name': 'Database'})]
+
+	elif re.match("show tables", query, re.IGNORECASE):
 	
-		ret_cols, ret_rows = run_as_cmd("SHOW DATABASES", "show namespaces")
+		ret_cols, ret_rows = run_as_cmd(
+			"show tables", "show sets"
+		)
+
+		cols = [
+			server.new_definition({'name': "Name"})
+		]
+
+		set_name_field_indx = ret_cols.index('set')
+		for row in ret_rows:
+			del row[0:set_name_field_indx]
+			del row[1:]
 
 		rows = ret_rows
-		cols.append(server.new_definition(
-			{'name': 'Database'}
-		))
+	elif re.match('show table status', query, re.IGNORECASE):
 
-	elif "SHOW TABLE STATUS" in query:
-	
-		ret_cols, ret_rows = run_as_cmd("SHOW TABLE STATUS", "show sets")
+		ret_cols, ret_rows = run_as_cmd(
+			"show table status", "show sets"
+		)
 
-		rows = ret_rows		
-		for field_name in ret_cols:
-			cols.append(server.new_definition(
-				{'name': "Name" if field_name == "set" else field_name}
-			))
-		
-	elif "SELECT" in query or "select" in query:		
-		ret_cols, ret_rows = run_as_cmd("SELECT", query.replace('\r\n', ' '))
+		cols = [
+			server.new_definition({'name': "Name"}),
+			server.new_definition({'name': "Engine"}),
+			server.new_definition({'name': "Version"}),
+			server.new_definition({'name': "Row_format"}),
+			server.new_definition({'name': "Rows", "type": MYSQL_TYPE_DECIMAL}),
+			server.new_definition({'name': "Avg_row_length", "type": MYSQL_TYPE_DECIMAL}),
+			server.new_definition({'name': "Data_length", "type": MYSQL_TYPE_DECIMAL}),
+			server.new_definition({'name': "Max_data_length", "type": MYSQL_TYPE_DECIMAL}),
+			server.new_definition({'name': "Index_length", "type": MYSQL_TYPE_DECIMAL}),
+			server.new_definition({'name': "Data_free", "type": MYSQL_TYPE_DECIMAL}),
+		]
 
-		rows = ret_rows		
+		set_name_field_indx = ret_cols.index('set')
+		for row in ret_rows:
+			del row[0:set_name_field_indx]
+			del row[1:]
+
+			row.extend(['Aerospike', '10', 'Fixed', None, None, None, None, None, None])
+
+		rows = ret_rows
+	else:
+		ret_cols, ret_rows = run_as_cmd(
+			''.join(random.choices(string.ascii_uppercase + string.digits, k=7)), query.replace('\r\n', ' ')
+		)
+
+		cols = []
+		rows = ret_rows
 		for field_name in ret_cols:
 			cols.append(server.new_definition(
 				{'name': field_name}
@@ -810,27 +847,27 @@ def handle_query(server, query):
 	try:
 
 		# dummy outputs...
-		if "USE" in query or \
-				"SHOW EVENTS" in query or \
-				"SHOW ENGINES" in query or \
-				"SHOW FUNCTION" in query or \
-				"SHOW TRIGGERS" in query or \
-				"SHOW WARNINGS" in query or \
-				"SHOW PROCEDURE" in query or "SELECT DATABASE" in query:
+		if re.match(
+				"use|show events|show engines|show function|show triggers|show warnings|show procedure|select database",
+				query, re.IGNORECASE):
 			cols = []
 			rows = []
 
-		elif "SELECT @@version_comment" in query or "select @@version_comment" in query:
-			cols = [{'name': '@@version_comment'}]
+		elif re.match("select @@version_comment", query, re.IGNORECASE):
+			cols = [server.new_definition({'name': '@@version_comment'})]
 			rows = [['(mysql2as_driver)']]
 
-		elif "SHOW STATUS" in query:
+		elif re.match("select @@global.max_allowed_packet", query, re.IGNORECASE):
+			cols = [server.new_definition({'name': '@@global.max_allowed_packet', 'type': MYSQL_TYPE_STRING})]
+			rows = [['33554432']]
+
+		elif re.match("show status", query, re.IGNORECASE):
 			cols = [server.new_definition({'name': 'Variable_name'}), server.new_definition({'name': "Value"})]
 			rows = [['Compression', 'OFF'], ["Uptime", "989898"]]
 
-		elif "SHOW VARIABLES" in query:
+		elif re.match("show variables", query, re.IGNORECASE):
 			cols = [server.new_definition({'name': 'Variable_name'}), server.new_definition({'name': "Value"})]
-			rows = [['hostname', 'localhost'], ['time_format', '%H:%i:%s'], ['time_zone', 'SYSTEM'], ['version_comment', '(mysql2as_driver)']]
+			rows = [['time_zone', 'SYSTEM'], ['hostname', 'localhost'], ['time_format', '%H:%i:%s'], ['version_comment', '(mysql2as_driver)']]
 
 		elif "SHOW COLLATION" in query:
 			cols = [
@@ -849,24 +886,20 @@ def handle_query(server, query):
 			]
 
 		# -----
-		elif "DEFAULT_COLLATION_NAME" in query and "SCHEMA_NAME" in query  :
-			cols = [server.new_definition({'name' : 'DEFAULT_COLLATION_NAME'})]
-			rows = [[ "utf8_general_ci" ]]
+		elif "DEFAULT_COLLATION_NAME" in query and "SCHEMA_NAME" in query:
+			cols = [server.new_definition({'name': 'DEFAULT_COLLATION_NAME'})]
+			rows = [["utf8_general_ci"]]
 
 		# -----
-		elif "SELECT CONNECTION_ID()" in query  :
-			cols = [server.new_definition({'name' : 'CONNECTION_ID()'})]
-			rows = [[ random.randint(1091364, 9091364) ]]
+		elif "SELECT CONNECTION_ID()" in query:
+			cols = [server.new_definition({'name': 'CONNECTION_ID()'})]
+			rows = [[random.randint(1091364, 9091364)]]
 		# -----
-		elif "SELECT" in query or \
-				"select" in query or \
-				"SHOW TABLES" in query or \
-				"SHOW DATABASES" in query or \
-				"SHOW TABLE STATUS" in query:
+		elif re.search("select|show tables|show databases|show table status", query, re.IGNORECASE):
 			cols, rows = handle_query_run_aerospike(server, query)
 		# -----
 		else:
-			cols = [{'name': query}]
+			cols = []
 			rows = []
 
 		# Then send it back to the user in table format
