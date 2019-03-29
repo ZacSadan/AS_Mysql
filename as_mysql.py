@@ -437,7 +437,7 @@ class Server(object):
 				raise ServerError('Not Authorized')
 
 			self.onPacket = self.normal_packet_handler
-			self.send_ok()
+			self.send_ok({'message': 'OK'})
 		except:
 			self.send_error({'message': 'Authorization Failure'})
 			self.socket.shutdown(self.shutdown_flag)
@@ -461,19 +461,20 @@ class Server(object):
 		return args
 	
 	def send_ok(self, args=None):
-		def_args = {'insertId': None, 'affectedRows': 0, 'warningCount': 0}
+		def_args = {'message': None, 'insertId': None, 'affectedRows': 0, 'warningCount': 0}
 		args = self.get_args_with_defaults(
 			args,
 			def_args
 		)
 
+		data = Buffer(len(args.get('message')) + 64)
 		pos = 4
-		data = Buffer(64)
 		pos = data.writeUInt8(0, pos)
 		pos = self.write_length_coded_binary(data, pos, args.get('affectedRows'))
 		pos = self.write_length_coded_binary(data, pos, args.get('insertId'))
 		pos = data.writeUInt16LE(SERVER_STATUS_AUTOCOMMIT, pos)
 		pos = data.writeUInt16LE(args.get('warningCount', 0), pos)
+		pos = self.write_length_coded_string(data, pos, args.get('message'))
 
 		self.write_header(data, pos)
 		self.send_packet(data.slice(0, pos))
@@ -834,12 +835,12 @@ def handle_query(server, query):
 
 		elif "SHOW COLLATION" in query:
 			cols = [
-				server.new_definition({'name': 'Id'}),
-				server.new_definition({'name': 'Charset'}),
-				server.new_definition({'name': 'Default'}),
-				server.new_definition({'name': 'Sortlen'}),
-				server.new_definition({'name': 'Compiled'}),
 				server.new_definition({'name': 'Collation'}),
+				server.new_definition({'name': 'Charset'}),
+				server.new_definition({'name': 'Id'}),
+				server.new_definition({'name': 'Default'}),
+				server.new_definition({'name': 'Compiled'}),
+				server.new_definition({'name': 'Sortlen'}),
 			]
 
 			rows = [
@@ -882,7 +883,7 @@ def command_handler(server, cmd):
 	if command == COM_QUERY:
 		handle_query(server, extra.decode('utf-8', 'ignore'))
 	elif command == COM_PING:
-		server.send_ok()
+		server.send_ok({'message': 'OK'})
 	elif command is None or command == COM_QUIT:
 		print('Disconnecting')
 		server.handle_disconnect()
