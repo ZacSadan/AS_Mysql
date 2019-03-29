@@ -19,7 +19,7 @@ from threading import Thread
 
 print('Start server...')
 
-AS_HOST, HOST, PORT = os.environ['AS_HOST'] or '127.0.0.1', '', 3306  # default MySQL Server Port
+AS_HOST, HOST, PORT = '127.0.0.1', '', 3306  # default MySQL Server Port
 
 __author__ = 'Zac Sadan, Dmitri Krasnenko'
 __license__ = "GPL"
@@ -849,7 +849,7 @@ def handle_query(server, query):
 
 		# dummy outputs...
 		if re.match(
-				"use|show events|show engines|show function|show triggers|show warnings|show procedure|select database",
+				"use|show events|show engines|show function|show triggers|show warnings|show procedure|select database|select now",
 				query, re.IGNORECASE):
 			cols = []
 			rows = []
