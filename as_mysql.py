@@ -159,6 +159,8 @@ SET_FLAG = 2048
 NO_DEFAULT_VALUE_FLAG = 4096
 NUM_FLAG = 32768
 
+AEROSPIKE_QUERY_TIMEOUT = 10000
+
 
 def hex_subset(data):
     return ' '.join('%02x' % b for b in data)
@@ -692,7 +694,7 @@ def run_as_cmd(query, cmd):
 def run_aql(host, cmd):
     print("Execs: aql -h {} -c '{}'".format(host, cmd))
 
-    proc = subprocess.Popen(['aql', '-h', host, '-c', cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(['aql', '-h', host, '-c', 'set timeout {}; {}'.format(AEROSPIKE_QUERY_TIMEOUT, cmd)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stds = proc.communicate()
     resc = proc.wait()
 
@@ -707,14 +709,24 @@ def run_aql(host, cmd):
 
 def transform_aql_to_arr(output):
 
+    def is_all_columns(cl, rw):
+        for ind in range(0, len(cl)):
+            if cl[ind] != rw[ind]:
+                return False
+        return True
+
     if output and len(output) >= 5:
         rows = []
-        cols = [col.strip().replace('"', '') for col in output[2].decode("utf-8").split('|') if col.strip()]
+        cols = [col.strip().replace('"', '') for col in output[4].decode("utf-8").split('|') if col.strip()]
 
-        for row_str in output[4:-6]:
+        for row_str in output[6:-6]:
             dec_row_str = row_str.decode(
                 "utf-8"
             )
+
+            # Ignore AQL header line
+            if dec_row_str[0] == '+':
+                continue
 
             i = 0
             j = len(dec_row_str)
@@ -724,11 +736,12 @@ def transform_aql_to_arr(output):
             if dec_row_str[-1] == '|':
                 j = -1
 
-            rows.append(
-                [
-                    row.strip().replace('"', '') for row in dec_row_str[i:j].split('|')
-                ]
-            )
+            row = [cell.strip().replace('"', '') for cell in dec_row_str[i:j].split('|')]
+
+            if not is_all_columns(cols, row):
+                rows.append(
+                    row
+                )
 
         return cols, rows
     else:
