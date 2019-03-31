@@ -214,7 +214,7 @@ class Server(object):
             'name': params.get('name'),
             'orgName': params.get('orgName'),
             'length': params.get('length', 0),
-            'type': params.get('type', MYSQL_TYPE_STRING),
+            'type': params.get('type', MYSQL_TYPE_VAR_STRING),
             'flags': params.get('flags', 0),
             'decimals': params.get('decimals'),
             'default': params.get('default')
@@ -230,13 +230,15 @@ class Server(object):
             )
 
         pos = payload.writeUInt8(0x0C, pos)
-        pos = payload.writeUInt16LE(11, pos)  # utf8_general_ci
+        pos = payload.writeUInt16LE(11, pos)  # ASCII
         pos = payload.writeUInt32LE(definition.get('length'), pos)
         pos = payload.writeUInt8(definition.get('type'), pos)
         pos = payload.writeUInt16LE(definition.get('flags', 0), pos)
         pos = payload.writeUInt8(definition.get('decimals', 0), pos)
         pos = payload.writeUInt16LE(0, pos)  # \0\0 FILLER
-        pos = self.write_length_coded_string(payload, pos, definition.get('default'))
+
+        # Deprecated by MySQL
+        # pos = self.write_length_coded_string(payload, pos, definition.get('default'))
 
         self.write_header(payload, pos)
         self.send_packet(payload.slice(0, pos))
@@ -797,7 +799,7 @@ def handle_query_run_aerospike(server, query):
             "show databases", "show namespaces"
         )
 
-        cols = [server.new_definition({'name': 'Database', 'type': MYSQL_TYPE_VARCHAR})]
+        cols = [server.new_definition({'name': 'Database'})]
 
     elif re.match("show tables", query, re.IGNORECASE):
 
@@ -893,13 +895,13 @@ def handle_query(server, query):
             rows = [['(mysql2as_driver)']]
 
         elif re.match("select @@global.max_allowed_packet", query, re.IGNORECASE):
-            cols = [server.new_definition({'name': '@@global.max_allowed_packet', 'type': MYSQL_TYPE_STRING})]
+            cols = [server.new_definition({'name': '@@global.max_allowed_packet'})]
             rows = [['33554432']]
 
         elif re.match("show status", query, re.IGNORECASE):
             cols = [
-                server.new_definition({'name': 'Variable_name', 'type': MYSQL_TYPE_STRING}),
-                server.new_definition({'name': 'Value', 'type': MYSQL_TYPE_STRING})
+                server.new_definition({'name': 'Variable_name'}),
+                server.new_definition({'name': 'Value'})
             ]
 
             rows = [
