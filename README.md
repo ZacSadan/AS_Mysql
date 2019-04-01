@@ -18,7 +18,7 @@ AS_Mysql was intentionally written as a single python file, due to the following
 
 <img src="README_imgs/connect.png" height="300">
 
-* Show namespaces / Show sets / Select Query :*
+*Show namespaces / Show sets / Select Query :*
 
 <img src="README_imgs/select.png" height="300">
 
