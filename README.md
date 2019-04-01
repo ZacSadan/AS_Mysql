@@ -16,23 +16,11 @@ AS_Mysql was intentionally written as a single python file, due to the following
 
 *Connect:*
 
-<img src="README/connect.png" height="300">
+<img src="README_imgs/connect.png" height="300">
 
-*Browse Namespaces:*
+*Show namespaces/Show sets/Select query:*
 
-<img src="README/namespaces.png" height="300">
-
-*Browse Variables:*
-
-<img src="README/variables.png" height="300">
-
-*Show Table Status (Table fields and details):*
-
-<img src="README/table_status.png" height="300">
-
-* 'Select' from AeroSpike :*
-
-<img src="README/select.png" height="300">
+<img src="README_imgs/select.png" height="300">
 
 
 **Contributors:**
