@@ -877,7 +877,7 @@ def handle_query(server, query):
 
         # dummy outputs...
         if re.match(
-                "use|show events|show engines|show function|show triggers|show warnings|show procedure",
+                "use|show events|show engines|show function|show triggers|show warnings|show procedure|current_user",
                 query, re.IGNORECASE):
             cols = None
             rows = None
