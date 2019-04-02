@@ -22,6 +22,10 @@ AS_Mysql was intentionally written as a single python file, due to the following
 
 <img src="README_imgs/select.png" height="300">
 
+*Select Query with Specific Key :*
+
+<img src="README_imgs/select_pk.png" height="300">
+
 
 **Contributors:**
 
