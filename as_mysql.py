@@ -8,6 +8,7 @@ nohup python36 ./as_mysql.py  >/dev/null 2>&1 &
 '''
 import re
 import os
+import sys
 import socket
 import random
 import string
@@ -16,6 +17,10 @@ import datetime
 import traceback
 import subprocess
 from threading import Thread
+
+if not sys.version_info >= (3, 6):
+    print('Python {}.{} detected. Python 3.6 or above is required. Aborting ...'.format(sys.version_info.major, sys.version_info.minor))
+    sys.exit(1)
 
 print('Start server...')
 
