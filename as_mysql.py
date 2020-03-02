@@ -8,6 +8,7 @@ nohup python36 ./as_mysql.py  >/dev/null 2>&1 &
 '''
 import re
 import os
+import sys
 import socket
 import random
 import string
@@ -16,6 +17,10 @@ import datetime
 import traceback
 import subprocess
 from threading import Thread
+
+if not sys.version_info >= (3, 6):
+    print('Python {}.{} detected. Python 3.6 or above is required. Aborting ...'.format(sys.version_info.major, sys.version_info.minor))
+    sys.exit(1)
 
 print('Start server...')
 
@@ -703,7 +708,7 @@ def run_aql(host, cmd):
     stderr = stds[1]
     stdout = stds[0]
 
-    if not resc and not stderr:
+    if not resc and (not stderr or stdout):
         return stdout.splitlines()
     else:
         raise Exception(stderr.decode("utf-8"))
@@ -877,7 +882,7 @@ def handle_query(server, query):
 
         # dummy outputs...
         if re.match(
-                "use|show events|show engines|show function|show triggers|show warnings|show procedure|select current_user",
+                "use|show events|show engines|show function|show triggers|show warnings|show procedure|select current_user|select schema",
                 query, re.IGNORECASE):
             cols = None
             rows = None
@@ -893,6 +898,14 @@ def handle_query(server, query):
         elif re.match("select @@version_comment", query, re.IGNORECASE):
             cols = [server.new_definition({'name': '@@version_comment'})]
             rows = [['(mysql2as_driver)']]
+
+        elif re.match("select @@sql_mode", query, re.IGNORECASE):
+            cols = [server.new_definition({'name': '@@sql_mode'})]
+            rows = [['NO_ENGINE_SUBSTITUTION']]
+
+        elif re.match("select concat\(@@version, ' ', @@version_comment\)", query, re.IGNORECASE):
+            cols = [server.new_definition({'name': 'concat(@@version, \' \', @@version_comment)'})]
+            rows = [['5.6.42 (mysql2as_driver)']]
 
         elif re.match("select @@global.max_allowed_packet", query, re.IGNORECASE):
             cols = [server.new_definition({'name': '@@global.max_allowed_packet'})]
@@ -918,6 +931,7 @@ def handle_query(server, query):
                     ['hostname', 'localhost'],
                     ['time_format', '%H:%i:%s'],
                     ['lower_case_table_names', '1'],
+                    ['sql_mode', 'NO_ENGINE_SUBSTITUTION'],
                     ['version_comment', '(mysql2as_driver)']
                 ]
 
